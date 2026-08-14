@@ -31,179 +31,183 @@ MIN_PERIOD_MA = 100   # minimum periods to compute the moving average
 INDICATORS = ["TRADITIONAL", "MOMENTUM", "LONGTERM", "BUYDIP"]
 INDICATORS_MIN = 3  # minimum number of valid indicators to keep an ETF
 WEIGHTS = {"TRADITIONAL": 0.25, "MOMENTUM": 0.25, "LONGTERM": 0.25, "BUYDIP": 0.25}
+MIN_ETFS = 5   # minimum number of valid ETFs
+
+
+
 
 # =============================================================================
 # 3. INDICATORS
 # =============================================================================
 
-def compute_indicators(price: pd.Series) -> pd.DataFrame:
-    """Compute the four indicators for a single ETF's price series."""
-    d = pd.DataFrame({"price": price})
+# TRADITIONAL — mean reversion: how far the price sits below its long-term average
+long_avg    = prices.rolling(ROLLING_MA, min_periods=MIN_PERIOD_MA).mean()
+TRADITIONAL = -(prices - long_avg) / long_avg
 
-    # TRADITIONAL - mean reversion: how far the price sits below its long-term average.
-    long_avg = d["price"].rolling(ROLLING_MA, min_periods=MIN_PERIOD_MA).mean()
-    d["TRADITIONAL"] = -(d["price"] - long_avg) / long_avg
+# MOMENTUM — trend follower: 12-1 month return (skips the last month, which tends to reverse) + 3-month return
+mom_12_1 = prices.shift(21) / prices.shift(260) - 1
+mom_3m   = prices / prices.shift(22 * 3) - 1
+MOMENTUM = 0.6 * mom_12_1 + 0.4 * mom_3m
 
-    # MOMENTUM - trend follower: 12-1 month return (skips the last month, which tends to reverse) blended with the 3-month return.
-    mom_12_1 = d["price"].shift(21) / d["price"].shift(260) - 1
-    mom_3m = d["price"] / d["price"].shift(22*3) - 1
-    d["MOMENTUM"] = 0.6 * mom_12_1 + 0.4 * mom_3m
+# LONGTERM — buy and hold: 2-year Sharpe ratio, penalised by the max drawdown over the same window
+ret      = prices.pct_change()
+window   = ret.rolling(260 * 2, min_periods=260)
+sharpe   = window.mean() / window.std() * np.sqrt(260)
+drawdown = prices.rolling(260 * 2, min_periods=260).apply(
+    lambda x: (x / np.maximum.accumulate(x) - 1).min(), raw=True
+)
+LONGTERM = sharpe * (1 + drawdown)   # drawdown is negative -> it penalises
 
-    # LONGTERM - buy and hold: 2-year Sharpe ratio, penalized by the max drawdown over the same window.
-    ret = d["price"].pct_change()
-    window = ret.rolling(260*2, min_periods=260)
-    sharpe = window.mean() / window.std() * np.sqrt(260)
-    drawdown = d["price"].rolling(2+260, min_periods=260).apply(
-        lambda x: (x / np.maximum.accumulate(x) - 1).min(), raw=True
-    )
-    d["LONGTERM"] = sharpe * (1 + drawdown)  # drawdown is negative -> penalizes
+# BUYDIP — buy the dip: rebound from the 3-month low + distance from the 1-year high
+min_3m  = prices.rolling(3 * 22).min()
+max_1y  = prices.rolling(260).max()
+depth   = (prices - min_3m) / min_3m
+context = -(prices - max_1y) / max_1y
+BUYDIP  = 0.5 * depth + 0.5 * context
 
-    # BUYDIP - buy the dip: rebound from the 3-month low plus distance from the 1-year high. 
-    min_3m = d["price"].rolling(3*22).min()
-    max_1y = d["price"].rolling(260).max()
-    depth = (d["price"] - min_3m) / min_3m
-    context = -(d["price"] - max_1y) / max_1y
-    d["BUYDIP"] = 0.5 * depth + 0.5 * context
+# assembly: from 4 DataFrames (date × ticker) to a dict {ticker: DataFrame(date × indicators)}
+panel = pd.concat({"TRADITIONAL": TRADITIONAL,
+                   "MOMENTUM": MOMENTUM,
+                   "LONGTERM": LONGTERM,
+                   "BUYDIP": BUYDIP}, axis=1)
 
-    return d[INDICATORS]
-
-
-indicators = {ticker: compute_indicators(prices[ticker]) for ticker in prices.columns}
 names = dict(zip(tickers["ticker"], tickers["name"]))
+
+
+
+
 
 # =============================================================================
 # 4. COMPOSITE SCORE
 # =============================================================================
+# Stessa logica cross-sectional di prima, ripetuta a OGNI data invece che solo
+# sull'ultima. Nessun look-ahead: a ogni giro usa solo dati <= d.
 
-def orthogonalize(z: pd.DataFrame) -> pd.DataFrame:
-    """Symmetric (Loewdin) orthogonalization: decorrelates the signals while
-    keeping each one as close as possible to its original version, so no
-    signal is arbitrarily favored the way sequential (Gram-Schmidt)
-    orthogonalization would favor whichever signal goes first.
-    """
-    filled = z.fillna(0.0)  # 0 = cross-sectional average, a neutral stand-in for missing data
-    corr = filled.corr().values
-    eigvals, eigvecs = np.linalg.eigh(corr)
-    eigvals = np.clip(eigvals, 1e-8, None)  # avoid divide-by-zero on near-collinear signals
-    inv_sqrt_corr = eigvecs @ np.diag(eigvals ** -0.5) @ eigvecs.T
-    orth = filled.values @ inv_sqrt_corr
-    return pd.DataFrame(orth, index=z.index, columns=z.columns)
+w = pd.Series(WEIGHTS)[INDICATORS]
+composite_ts, rank_ts, results = {}, {}, {}
 
+for d in prices.index:
 
-def compute_ranking(indicators: dict, names: dict) -> pd.DataFrame:
-    """Cross-sectional z-score at the latest date, orthogonalized and combined
-    into a weighted average.
+    # 4.1 snapshot: valore di ogni indicatore alla data d, per ogni ETF
+    snapshot = panel.loc[d].unstack(level=0)[INDICATORS]   # ticker x indicatori
 
-    The z-score compares each ETF with the OTHER ETFs at the same point in time,
-    not with its own history: that's what makes it possible to compare indicators
-    with different units (a ratio vs. a Sharpe ratio). Orthogonalization then
-    removes the overlap between signals so the weighted average doesn't cancel
-    itself out (see section 6, signal diagnostics).
-    """
-    last = pd.DataFrame({t: ind.iloc[-1] for t, ind in indicators.items()}).T[INDICATORS]
+    # scarta gli ETF con troppi pochi indicatori validi (storia insufficiente)
+    included = snapshot.notna().sum(axis=1)
+    excluded = snapshot.index[included < INDICATORS_MIN].tolist()
+    last = snapshot.loc[included >= INDICATORS_MIN]
 
-    included = last.notna().sum(axis=1)
-    excluded = last.index[included < INDICATORS_MIN].tolist()
-    last = last.loc[included >= INDICATORS_MIN]
+    # nelle date di warm-up la cross-section e' troppo piccola: si salta la data
+    # (prima era un raise SystemExit, qui deve essere un continue)
+    if len(last) < MIN_ETFS:
+        continue
 
-    if len(last) < 5:
-        raise SystemExit(
-            f"Only {len(last)} ETFs have enough history: with so few names the cross-sectional z-score is not meaningful."
-        )
-
+    # 4.2 z-score cross-sectional: confronta ogni ETF con gli ALTRI alla stessa data
     raw_z = (last - last.mean()) / last.std()
-    z = orthogonalize(raw_z)
 
-    def composite(riga):
-        membs = [c for c in WEIGHTS if pd.notna(riga[c])]
-        if not membs:
-            return np.nan
-        return sum(WEIGHTS[c] * riga[c] for c in membs) / sum(WEIGHTS[c] for c in membs)
+    # 4.3 ortogonalizzazione simmetrica (Loewdin)
+    filled  = raw_z.fillna(0.0)
+    corr    = filled.corr().values
+    eigvals, eigvecs = np.linalg.eigh(corr)
+    eigvals = np.clip(eigvals, 1e-8, None)
+    inv_sqrt_corr = eigvecs @ np.diag(eigvals ** -0.5) @ eigvecs.T
+    z = pd.DataFrame(filled.values @ inv_sqrt_corr, index=raw_z.index, columns=raw_z.columns)
 
-    z["COMPOSITE"] = z.apply(composite, axis=1)
+    # 4.4 composite
+    num = z[w.index].mul(w).sum(axis=1)
+    den = z[w.index].notna().mul(w).sum(axis=1)
+    z["COMPOSITE"] = (num / den).where(den > 0)
     z = z.dropna(subset=["COMPOSITE"])
     z["RANK"] = z["COMPOSITE"].rank(ascending=False).astype(int)
 
-    ranking = z.sort_values("COMPOSITE", ascending=False)
-    ranking.insert(0, "NAME", [names.get(t, "") for t in ranking.index])
-    ranking.attrs["excluded"] = excluded
-    ranking.attrs["raw_z"] = raw_z  # pre-orthogonalization signals, for diagnostics
-    return ranking
+    # 4.5 accumula i risultati della data d
+    results[d] = (z, raw_z, excluded)      # snapshot completo, per le diagnostiche
+    composite_ts[d] = z["COMPOSITE"]
+    rank_ts[d] = z["RANK"]
 
 
-ranking = compute_ranking(indicators, names)
-ranking
+# 4.6 serie storiche date x ticker: questo e' l'input del backtest
+composite_ts = pd.DataFrame(composite_ts).T.reindex(columns=prices.columns)
+rank_ts      = pd.DataFrame(rank_ts).T.reindex(columns=prices.columns)
+composite_ts.index.name = rank_ts.index.name = "date"
+
+# 4.7 snapshot dell'ultima data, per heatmap e diagnostiche
+date = composite_ts.index[-1]
+z, raw_z, excluded = results[date]
+ranking = z.sort_values("COMPOSITE", ascending=False)
+ranking.insert(0, "NAME", [names.get(t, "") for t in ranking.index])
+ranking.attrs["excluded"] = excluded
+ranking.attrs["raw_z"] = raw_z
+
+print(f"\nAnalysis Date:\n  {date:%d/%m/%Y}")
+print(f"Ranking disponibili dal {composite_ts.index[0]:%d/%m/%Y} "
+      f"({len(composite_ts)} date su {len(prices)})")
+
+
+
+
 
 # =============================================================================
 # 5. HEATMAP
 # =============================================================================
 
-def heatmap(ranking: pd.DataFrame, date: pd.Timestamp):
-    cols = [*INDICATORS, "COMPOSITE"]
-    values = ranking[cols].astype(float)
+cols = [*INDICATORS, "COMPOSITE"]
+values = ranking[cols].astype(float)
 
-    fig, ax = plt.subplots(figsize=(13, max(4, len(ranking) * 0.5 + 1.5)))
-    image = ax.imshow(values.values, aspect="auto", cmap="RdYlGn")
+fig, ax = plt.subplots(figsize=(13, max(4, len(ranking) * 0.5 + 1.5)))
+image = ax.imshow(values.values, aspect="auto", cmap="RdYlGn")
 
-    ax.set_xticks(range(len(cols)))
-    ax.set_xticklabels(
-        [f"{c}\n({WEIGHTS[c]:.0%})" if c in WEIGHTS else f"{c}\n(weighted)" for c in cols],
-        fontsize=10, fontweight="bold",
-    )
-    ax.set_yticks(range(len(ranking)))
-    ax.set_yticklabels(
-        [f"{t}  —  {ranking.loc[t, 'NAME']}" for t in ranking.index], fontsize=9
-    )
+ax.set_xticks(range(len(cols)))
+ax.set_xticklabels([f"{c}\n({WEIGHTS[c]:.0%})" if c in WEIGHTS else f"{c}\n(weighted)" for c in cols],
+                   fontsize=10, fontweight="bold")
+ax.set_yticks(range(len(ranking)))
+ax.set_yticklabels([f"{t}  —  {ranking.loc[t, 'NAME']}" for t in ranking.index], fontsize=9)
 
-    # Separator line between the four indicators and the final composite score.
-    ax.axvline(cols.index("COMPOSITE") - 0.5, color="black", linewidth=3, zorder=5)
+# Separator line between the four indicators and the final composite score.
+ax.axvline(cols.index("COMPOSITE") - 0.5, color="black", linewidth=1, zorder=5)
 
-    for i in range(values.shape[0]):
-        for j in range(values.shape[1]):
-            ax.text(j, i, f"{values.values[i, j]:.2f}",
-                    ha="center", va="center", fontsize=8, color="black")
+for i in range(values.shape[0]):
+    for j in range(values.shape[1]):
+        ax.text(j, i, f"{values.values[i, j]:.2f}",
+                ha="center", va="center", fontsize=8, color="black")
 
-    fig.colorbar(image, ax=ax, label="Z-score")
-    ax.set_title(f"ETF quantitative ranking — z-score per indicator  ({date:%d/%m/%Y})",
-                 fontsize=13, fontweight="bold", pad=15)
-    fig.tight_layout()
-    plt.show()
-    return fig
+fig.colorbar(image, ax=ax, label="Z-score")
+ax.set_title(f"ETF quantitative ranking — z-score per indicator  ({date:%d/%m/%Y})",
+             fontsize=13, fontweight="bold", pad=15)
+fig.tight_layout()
+plt.show()
 
 
-_ = heatmap(ranking, prices.index[-1])
+
+
 
 # =============================================================================
 # 6. SIGNAL DIAGNOSTICS
 # =============================================================================
+# Checks whether the four indicators really carry different information.
+# Averaging four highly correlated signals does not produce a more robust signal: if two
+# of them point in opposite directions, the average cancels them out and the dispersion of
+# the composite falls below that of the individual signals. Run this on the RAW signals
+# (before orthogonalisation): that is where the redundancy shows up, because the
+# orthogonalisation removes it by construction.
 
-def diagnostics(signals: pd.DataFrame) -> None:
-    """Check whether the four indicators actually carry different information.
+signals = ranking.attrs["raw_z"]      
+# signals = ranking                     # second diagnostic (orthogonalised signals)
 
-    Averaging four strongly correlated signals doesn't produce a more robust
-    signal: if two of them are opposite to each other, the average cancels
-    them out and the composite's dispersion collapses below that of the
-    individual signals. Run this on the RAW (pre-orthogonalization) signals:
-    that's where redundancy actually shows up, since orthogonalize() removes
-    it by construction.
-    """
-    correlations = signals[INDICATORS].astype(float).corr()
-    print("\nCorrelation between signals (cross-section):")
-    print(correlations.round(2).to_string())
+correlations = signals[INDICATORS].astype(float).corr()
+print("\nCorrelation between signals (cross-section):")
+print(correlations.round(2).to_string())
 
-    weight_sum = sum(WEIGHTS.values())
-    composite = signals[INDICATORS].astype(float).mul(pd.Series(WEIGHTS)).sum(axis=1) / weight_sum
-    composite_std = composite.std()
-    avg_signal_std = signals[INDICATORS].astype(float).std().mean()
-    ratio = composite_std / avg_signal_std
-    print(f"\nComposite dispersion / average signal dispersion: {ratio:.2f}")
-    if ratio < 0.8:
-        print("  Below 1 = aggregation is cancelling information, not adding it up.")
+weight_sum = sum(WEIGHTS.values())
+composite = signals[INDICATORS].astype(float).mul(pd.Series(WEIGHTS)).sum(axis=1) / weight_sum
+composite_std = composite.std()
+avg_signal_std = signals[INDICATORS].astype(float).std().mean()
+ratio = composite_std / avg_signal_std
 
-    eigenvalues = np.clip(np.linalg.eigvalsh(correlations.values), 0, None)
-    effective = (eigenvalues.sum() ** 2) / (eigenvalues ** 2).sum()
-    print(f"Effective number of independent signals: {effective:.2f} out of {len(INDICATORS)}")
+print(f"\nComposite dispersion / average signal dispersion: {ratio:.2f}")
+if ratio < 0.8:
+    print("  Below 1 = aggregation is cancelling information, not adding it up.")
 
+eigenvalues = np.clip(np.linalg.eigvalsh(correlations.values), 0, None)
+effective = (eigenvalues.sum() ** 2) / (eigenvalues ** 2).sum()
+print(f"Effective number of independent signals: {effective:.2f} out of {len(INDICATORS)}")
 
-diagnostics(ranking.attrs["raw_z"])
-diagnostics(ranking)
