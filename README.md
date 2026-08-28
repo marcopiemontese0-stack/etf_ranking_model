@@ -73,42 +73,38 @@ Three benchmarks, each answering a different question:
 - **VWCE buy & hold** — the global equity market (FTSE All-World). Answers "could I have just bought the market?".
 - **60/40 VWCE/VAGF** — a classic balanced portfolio, rebalanced monthly. A risk reference, not a fair skill test (see below).
 ```
-                       annRet   annVol  Sharpe  maxDD
-Model (long top-4)     17.3%    14.7%   1.18    -12.1%
-Equal-weight           10.9%    10.6%   1.03    -13.1%
-VWCE buy & hold        10.7%    11.9%   0.90    -12.8%
-60/40 VWCE/VAGF        5.7%     8.0%    0.71    -10.9%
+                           annRet   annVol  Sharpe   maxDD
+Model (long top-4)          16.2%    16.3%    0.99  -16.5%
+Equal-weight universe       10.8%    12.2%    0.89  -10.4%
+VWCE buy & hold             10.1%    13.8%    0.74  -17.5%
+60/40 VWCE/VAGF              5.4%     8.9%    0.61  -10.4%
 
-active vs benchmark    active   TE      IR      hit    t
-Equal-weight           +6.0%    8.4%    0.72    61%    1.58
-VWCE buy & hold        +5.7%    11.9%   0.48    57%    1.11
-60/40 VWCE/VAGF        +11.1%   11.6%   0.96    62%    2.06
+active vs benchmark        active      TE     IR   hit     t
+Equal-weight universe        5.2%    8.8%   0.59   59%  1.32
+VWCE buy & hold              5.2%   12.7%   0.40   50%  0.98
+60/40 VWCE/VAGF             10.5%   12.5%   0.84   63%  1.84
+
 ```
-Two things matter more than the equity curve.
+Two things matter more than the equity curve: where the edge sits, and how strong it really is.
 
-**The ranking is monotone.** Split the universe into rank thirds and average the
-next-month return of each group:
+**The edge is in the top, not in the ordering.** Split the universe into rank thirds
+and average the next-month return of each group:
 ```
-top +1.18%
-mid +0.85%
-bottom +0.57%
+Rank IC (Spearman vs fwd 22d): mean 0.039, t 0.98, hit 65%
+Monotonicity (avg fwd return): top 1.19% | mid 0.84% | bottom 0.84%
 ```
-The score does not just pick four good names by luck, it orders the whole
-cross-section in the right direction.
+The top third clearly beats the field, but the middle and bottom are indistinguishable.
+The score identifies the leaders, it does not rank the laggards. 
+This is consistent with the long-only design: the value sits in the top of the book, which is also why shorting the bottom names adds nothing.
 
-**Predictive power, measured honestly.** The rank information coefficient (Spearman
-correlation between score and next-month return) averages +0.052. That is positive
-and in a reasonable range, but over 56 months its t-stat is 1.3, below the usual bar
-of 2. The edge is real in direction, not yet proven in size on this short sample.
+**Predictive power, measured honestly.** The rank information coefficient (Spearman correlation between score and next-month return) averages +0.039, with the right sign in 65% of months.
+But over the ~54 months in the sample its t-stat is about 1.0, well below the usual bar of 2: the average is not statistically distinguishable from zero here. 
+Read it as a signal that points the right way more often than not, whose size this short history cannot yet prove.
 
-How to read the three benchmarks together. The equal-weight comparison is the one
-that isolates skill, and it gives an information ratio of 0.72. The 60/40 comparison
-looks the strongest (IR 0.96, t above 2) but it is the least meaningful: a fully
-invested equity book beats a bond-diluted portfolio mostly by collecting the equity
-risk premium, which is not skill. The model does clear the 60/40 on Sharpe too
-(1.18 vs 0.71), so it is not only taking more risk, but the raw return gap should
-not be read as alpha.
-
+How to read the three benchmarks together. 
+The equal-weight comparison is the one that isolates skill, and it gives an information ratio of [IR vs EW]. 
+The 60/40 comparison looks the strongest (0.84) but it is the least meaningful: a fully invested equity book beats a bond-diluted portfolio mostly by collecting the equity risk premium, which is not skill. 
+The model also clears the 60/40 on Sharpe (0.99 vs 0.61), so it is not only taking more risk — but the raw return gap should not be read as alpha.
 
 
 
