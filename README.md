@@ -18,16 +18,16 @@ Daily prices run from January 2021 to August 2026.
 ```
 LONGTERM = Sharpe(2y) + 2 * MaxDrawdown(2y)
 ```
-Sharpe is annualized over a two-year rolling window. The drawdown is negative, so it always
-lowers the score. The multiplier 2 sets how much a drawdown costs relative to a point of
-Sharpe. The factor rewards ETFs that went up steadily, and punishes the ones that went up
-through deep falls.
+Sharpe is annualized over a two-year rolling window. 
+The drawdown is negative, so it always lowers the score. 
+The multiplier 2 sets how much a drawdown costs relative to a point of Sharpe. 
+The factor rewards ETFs that went up steadily, and punishes the ones that went up through deep falls.
 
 **BUYDIP — shape of the fall**
 ```
-depth   = rebound from the 3-month low
+rebound   = rebound from the 3-month low
 context = distance below the 1-year high
-BUYDIP  = 0.5 * z(depth) + 0.5 * z(context)
+BUYDIP  = 0.5 * z(rebound) + 0.5 * z(context)
 ```
 Both legs are standardized before they are added, otherwise the leg with the wider spread
 would dominate and the 50/50 weights would be fiction. The factor is high only when both
@@ -98,11 +98,11 @@ The score identifies the leaders, it does not rank the laggards.
 This is consistent with the long-only design: the value sits in the top of the book, which is also why shorting the bottom names adds nothing.
 
 **Predictive power, measured honestly.** The rank information coefficient (Spearman correlation between score and next-month return) averages +0.039, with the right sign in 65% of months.
-But over the ~54 months in the sample its t-stat is about 1.0, well below the usual bar of 2: the average is not statistically distinguishable from zero here. 
+But over the ~56 months in the sample its t-stat is about 1.0, well below the usual bar of 2: the average is not statistically distinguishable from zero here. 
 Read it as a signal that points the right way more often than not, whose size this short history cannot yet prove.
 
 How to read the three benchmarks together. 
-The equal-weight comparison is the one that isolates skill, and it gives an information ratio of [IR vs EW]. 
+The equal-weight comparison is the one that isolates skill, and it gives an information ratio of 0.59. 
 The 60/40 comparison looks the strongest (0.84) but it is the least meaningful: a fully invested equity book beats a bond-diluted portfolio mostly by collecting the equity risk premium, which is not skill. 
 The model also clears the 60/40 on Sharpe (0.99 vs 0.61), so it is not only taking more risk — but the raw return gap should not be read as alpha.
 
@@ -112,12 +112,16 @@ The model also clears the 60/40 on Sharpe (0.99 vs 0.61), so it is not only taki
 ## Limitations
 Please read this section before using any number from this repo.
 
-**The test is walk-forward, not a full backtest.**
+**Walk-forward test (no look-ahead).**
 No transaction costs, no bid-ask spread, no slippage. Monthly rebalancing of a 4-ETF book is cheap but not free, and the reported returns are gross.
 
 **The score is relative, never absolute.** 
 Because the standardization happens across ETFs on each date, someone always scores +2, even in a market where every ETF is falling. 
 The model tells you what to prefer, never whether to buy.
+
+**I chose the design after seeing the data.** 
+The score is computed point-in-time, but the factors, the weights and the top-4 cutoff were picked with the full sample in view.
+The 16.2% is therefore flattered by hindsight, and 5.2% a year is not a number to trust.
 
 **Survivorship bias.** 
 The price file only contains ETFs that exist today. Any historical study on this universe is optimistic by construction, because the products that closed are missing.
@@ -163,7 +167,7 @@ The first version used four factors: TRADITIONAL, MOMENTUM, LONGTERM and BUYDIP.
 The diagnostics showed the problem. TRADITIONAL and MOMENTUM had a cross-sectional correlation of -0.93, because both are essentially the trailing return with opposite signs. 
 The four factors carried only 1.43 independent signals, and the composite had one third of the dispersion of its own inputs. The aggregation was cancelling information, not adding it up.
 
-Dropping to two genuinely different factors was the better answer. Independent signals went from 1.43/4 to 1.97/2, and daily rank turnover fell by roughly 40%.
+Dropping to two genuinely different factors was the better answer. Independent signals went from 1.43(4) to 1.97(), and daily rank turnover fell by roughly 40%.
 
 ---
 ## Disclaimer
