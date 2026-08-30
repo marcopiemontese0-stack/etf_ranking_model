@@ -53,9 +53,9 @@ from January 2022, once the two-year windows have enough data. Every rolling win
 - Signal diagnostics printed on the console.
 Latest run:
 ```
-Effective number of independent signals: 1.97 out of 2
-Correlation between LONGTERM and BUYDIP: 0.12
-Composite dispersion / average signal dispersion: 0.75 (exact value implied by C: 0.75)
+Effective number of independent signals: 1.99 out of 2
+Composite dispersion / average signal dispersion: 0.68 (exact value implied by the correlation matrix: 0.68)
+
 ```
 The last line is a self-check, not a statistic. The dispersion of a weighted average of standardized signals must equal `sqrt(w' C w) / sum(w)`. 
 If the computed value does not match the algebra, then the weights, the NaN handling or the standardization are not doing what the code claims.
@@ -68,7 +68,7 @@ A ranking is only useful if a higher score today leads to a higher return tomorr
 This section tests exactly that, out of sample: the score at date *d* uses only data up to *d*, and it is judged on the return of the **next** month.
 
 Setup: on each rebalance date, go long the top 4 ETFs, equal-weighted, and hold for one month (22 trading days). 
-Rebalance and repeat. 56 non-overlapping months, from January 2022 to August 2026.
+Rebalance and repeat. 54 non-overlapping months, from January 2022 to August 2026.
 
 Three benchmarks, each answering a different question:
 - **Equal-weight universe** — the same 22 ETFs held equally, no selection. The honest one: any outperformance here comes from the ranking, not from the universe.
@@ -76,15 +76,15 @@ Three benchmarks, each answering a different question:
 - **60/40 VWCE/VAGF** — a classic balanced portfolio, rebalanced monthly. A risk reference, not a fair skill test (see below).
 ```
                            annRet   annVol  Sharpe   maxDD
-Model (long top-4)          16.2%    16.3%    0.99  -16.5%
+Model (long top-4)          15.7%    16.2%    0.97  -16.5%
 Equal-weight universe       10.8%    12.2%    0.89  -10.4%
 VWCE buy & hold             10.1%    13.8%    0.74  -17.5%
 60/40 VWCE/VAGF              5.4%     8.9%    0.61  -10.4%
 
 active vs benchmark        active      TE     IR   hit     t
-Equal-weight universe        5.2%    8.8%   0.59   59%  1.32
-VWCE buy & hold              5.2%   12.7%   0.40   50%  0.98
-60/40 VWCE/VAGF             10.5%   12.5%   0.84   63%  1.84
+Equal-weight universe        4.7%    8.8%   0.53   57%  1.20
+VWCE buy & hold              4.6%   13.0%   0.36   46%  0.88
+60/40 VWCE/VAGF             10.0%   12.7%   0.79   61%  1.74
 
 ```
 Two things matter more than the equity curve: where the edge sits, and how strong it really is.
@@ -92,15 +92,15 @@ Two things matter more than the equity curve: where the edge sits, and how stron
 **The edge is in the top, not in the ordering.** Split the universe into rank thirds
 and average the next-month return of each group:
 ```
-Rank IC (Spearman vs fwd 22d): mean 0.039, t 0.98, hit 65%
-Monotonicity (avg fwd return): top 1.19% | mid 0.84% | bottom 0.84%
+Rank IC (Spearman vs fwd 22d): mean 0.037, t 0.91, hit 63%
+Monotonicity (avg fwd return): top 1.20% | mid 0.88% | bottom 0.80%
 ```
 The top third clearly beats the field, but the middle and bottom are indistinguishable.
 The score identifies the leaders, it does not rank the laggards. 
 This is consistent with the long-only design: the value sits in the top of the book, which is also why shorting the bottom names adds nothing.
 
 **Predictive power, measured honestly.** The rank information coefficient (Spearman correlation between score and next-month return) averages +0.039, with the right sign in 65% of months.
-But over the ~56 months in the sample its t-stat is about 1.0, well below the usual bar of 2: the average is not statistically distinguishable from zero here. 
+But over the ~54 months in the sample its t-stat is about 1.0, well below the usual bar of 2: the average is not statistically distinguishable from zero here. 
 Read it as a signal that points the right way more often than not, whose size this short history cannot yet prove.
 
 How to read the three benchmarks together. 
