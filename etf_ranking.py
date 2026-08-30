@@ -39,7 +39,8 @@ MIN_ETFS = 5   # minimum number of valid ETFs
 # =============================================================================
 # 3. INDICATORS
 # =============================================================================
-def zs(x): x.sub(x.mean(axis=1), axis=0).div(x.std(axis=1), axis=0)
+def zs(x): 
+    return x.sub(x.mean(axis=1), axis=0).div(x.std(axis=1), axis=0)
 
 # LONGTERM — buy and hold: weighted combination of the standardised 2-year Sharpe and the standardised max drawdown over the same window
 ret      = prices.pct_change()
