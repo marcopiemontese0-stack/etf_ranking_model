@@ -112,10 +112,8 @@ The model also clears the 60/40 on Sharpe (0.99 vs 0.61), so it is not only taki
 ## Limitations
 Please read this section before using any number from this repo.
 
-**There is no backtest.** 
-The script produces the ranking, not the performance of the ranking.
-Nothing here shows that a high composite score leads to a higher future return. 
-This is the next step, and it is not done yet.
+**The test is walk-forward, not a full backtest.**
+No transaction costs, no bid-ask spread, no slippage. Monthly rebalancing of a 4-ETF book is cheap but not free, and the reported returns are gross.
 
 **The score is relative, never absolute.** 
 Because the standardization happens across ETFs on each date, someone always scores +2, even in a market where every ETF is falling. 
