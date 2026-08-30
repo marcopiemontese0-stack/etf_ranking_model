@@ -29,6 +29,8 @@ prices.index.name = "date"
 INDICATORS = ["LONGTERM", "BUYDIP"]
 INDICATORS_MIN = 2  # minimum number of valid indicators to keep an ETF (= all of them)
 WEIGHTS = {"LONGTERM": 0.5, "BUYDIP": 0.5}
+LONGTERM_W = {"sharpe": 0.75, "maxdd": 0.25}   # weights INSIDE LONGTERM
+BUYDIP_W   = {"rebound": 0.5, "context": 0.5}  # weights INSIDE BUYDIP
 MIN_ETFS = 5   # minimum number of valid ETFs
 
 
@@ -37,23 +39,23 @@ MIN_ETFS = 5   # minimum number of valid ETFs
 # =============================================================================
 # 3. INDICATORS
 # =============================================================================
+def zs(x): x.sub(x.mean(axis=1), axis=0).div(x.std(axis=1), axis=0)
 
-# LONGTERM — buy and hold: 2-year Sharpe ratio, penalised by the max drawdown over the same window
+# LONGTERM — buy and hold: weighted combination of the standardised 2-year Sharpe and the standardised max drawdown over the same window
 ret      = prices.pct_change()
 window   = ret.rolling(260 * 2, min_periods=260)
 sharpe   = window.mean() / window.std() * np.sqrt(260)
 drawdown = prices.rolling(260 * 2, min_periods=260).apply(
     lambda x: (x / np.maximum.accumulate(x) - 1).min(), raw=True
 )
-LONGTERM = sharpe + 2 * drawdown   # 2 = how much weights drawdown vs Sharpe.
+LONGTERM = LONGTERM_W["sharpe"] * zs(sharpe) + LONGTERM_W["maxdd"] * zs(drawdown)
 
 # BUYDIP — buy the dip: rebound from the 3-month low + distance from the 1-year high
 min_3m  = prices.rolling(3 * 22).min()
 max_1y  = prices.rolling(260).max()
-depth   = (prices - min_3m) / min_3m
+rebound   = (prices - min_3m) / min_3m
 context = -(prices - max_1y) / max_1y
-zs = lambda x: x.sub(x.mean(axis=1), axis=0).div(x.std(axis=1), axis=0)
-BUYDIP = 0.5 * zs(depth) + 0.5 * zs(context)
+BUYDIP = BUYDIP_W["rebound"] * zs(rebound) + BUYDIP_W["context"] * zs(context)
 
 # assembly: from 2 DataFrames (date × ticker) to a dict {ticker: DataFrame(date × indicators)}
 panel = pd.concat({"LONGTERM": LONGTERM, "BUYDIP": BUYDIP}, axis=1)
@@ -62,12 +64,11 @@ names = dict(zip(tickers["ticker"], tickers["name"]))
 
 
 
-
 # =============================================================================
 # 4. COMPOSITE SCORE
 # =============================================================================
-# Same cross-sectional logic as before, but repeated at EVERY date instead of
-# only on the last one. No look-ahead: each pass uses data <= d only.
+# Same cross-sectional logic as before, but repeated at EVERY date instead of only on the last one. 
+# No look-ahead: each pass uses data <= d only.
 
 w = pd.Series(WEIGHTS)[INDICATORS]
 composite_ts, rank_ts, results = {}, {}, {}
@@ -162,12 +163,7 @@ plt.show()
 # =============================================================================
 # 6. SIGNAL DIAGNOSTICS
 # =============================================================================
-# Checks whether the four indicators really carry different information.
-# Averaging four highly correlated signals does not produce a more robust signal: if two
-# of them point in opposite directions, the average cancels them out and the dispersion of
-# the composite falls below that of the individual signals. There is no orthogonalisation
-# any more, so this diagnostic is load-bearing: whatever redundancy it reports is
-# redundancy that ends up in the composite as-is.
+# Checks whether the indicators really carry different information.
 
 signals = ranking.attrs["raw_z"]
 
