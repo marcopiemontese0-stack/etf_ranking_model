@@ -14,14 +14,18 @@ Daily prices run from January 2021 to August 2026.
 
 ---
 ## The two factors
+Every leg of both factors is standardized across ETFs before being combined. 
+Added raw, a ratio and a percentage would mix at whatever exchange rate the data happens to imply, and the weights below would not mean what they say.
+**LONGTERM — quality of the ride**
+
 **LONGTERM — quality of the ride**
 ```
-LONGTERM = Sharpe(2y) + 2 * MaxDrawdown(2y)
+LONGTERM = 0.75 * z(Sharpe_2y) + 0.25 * z(MaxDrawdown_2y)
 ```
 Sharpe is annualized over a two-year rolling window. 
-The drawdown is negative, so it always lowers the score. 
-The multiplier 2 sets how much a drawdown costs relative to a point of Sharpe. 
-The factor rewards ETFs that went up steadily, and punishes the ones that went up through deep falls.
+The drawdown is the worst fall in the same window; it is negative, so a deep fall already scores low and the leg is added, not subtracted. 
+The 75/25 says drawdown matters but risk-adjusted return decides. Only the ratio between the two weights matters, since the composite standardizes LONGTERM again later.
+The factor rewards ETFs that went up steadily, and penalizes the ones that got there through deep falls.
 
 **BUYDIP — shape of the fall**
 ```
@@ -29,10 +33,8 @@ rebound   = rebound from the 3-month low
 context = distance below the 1-year high
 BUYDIP  = 0.5 * z(rebound) + 0.5 * z(context)
 ```
-Both legs are standardized before they are added, otherwise the leg with the wider spread
-would dominate and the 50/50 weights would be fiction. The factor is high only when both
-conditions hold (well below the highs but already recovering). It is low for an ETF sitting
-at its high, and equally low for one that is still falling.
+The two legs are averaged, so a strong reading on one offsets a weak reading on the other.
+The factor is highest for an ETF well below its highs and already recovering, and lowest for one sitting at its high. An ETF still falling lands in the middle.
 
 ---
 ## How the score is built
